@@ -27,7 +27,7 @@ $dbh = pdo_connect(
 // Create weathermaps
 foreach ($weathermapper as $k => $v) {
     // Evaluate search options and return devices matched + layout grid
-    list($devices,$layout) = get_device_list($dbh,$v['search_opts']);
+    list($devices,$layout,$images) = get_device_list($dbh,$v['search_opts']);
 
     // Generate link information between devices
     $link_opts=[];
@@ -54,15 +54,20 @@ foreach ($weathermapper as $k => $v) {
       $v['title'],
       $k,
       $map_dir,
-      $router_image
+      $router_image, 
+      $images
     );
+
+    // We need grid_dict in links for VIA
+
+    $grid = create_grid_dict($devices, $layout, $v['grid_opts']);
 
     // Concatenate link configs
     $map_rrd_dir = '.';
     if(!empty($config['rrd_dir'])) {
       $map_rrd_dir = $config['rrd_dir'];
     }
-    $map_config .= create_link_config($links,$map_rrd_dir);
+    $map_config .= create_link_config($dbh,$links,$map_rrd_dir,$grid);
 
     // Write to file
     $file = $output_dir."/".$k.".conf";

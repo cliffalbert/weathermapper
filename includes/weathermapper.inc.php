@@ -31,17 +31,18 @@ function get_device_list($dbh,$search_opts) {
   $layout=[];
   $devices=[];
   $device_arr=[];
+  $images=[];
   foreach ($search_opts['types'] as $type) {
     switch($type) {
       case 'hostname':
         if (array_key_exists('hostnames',$search_opts)) {
           $device_list=[];
-          $sql = 'SELECT device_id, hostname FROM devices';
+          $sql = 'SELECT device_id, sysname FROM devices';
           $sth = $dbh->query($sql);
           $sth->setFetchMode(PDO::FETCH_ASSOC);
           while($row = $sth->fetch()) {
-            $device_list[] = $row['hostname'];
-            $device_arr[$row['hostname']] = $row['device_id'];
+            $device_list[] = $row['sysname'];
+            $device_arr[$row['sysname']] = $row['device_id'];
           }
           foreach($search_opts['hostnames'] as $k => $v) {
             $matches = preg_grep('/'.$v['regex'].'/', $device_list);
@@ -49,6 +50,9 @@ function get_device_list($dbh,$search_opts) {
               if(!array_key_exists($match, $devices)) {
                 $layout[$v['row']][] = $match;
 	        $devices[$match] = $device_arr[$match];
+		if(array_key_exists('router_image',$v)) {
+			$images[$match] = $v['router_image'];
+		}
               }
             }
           }
@@ -60,7 +64,7 @@ function get_device_list($dbh,$search_opts) {
 	    $sql = '
               SELECT
                 device_id,
-                hostname
+                sysname 
               FROM
                 devices
               WHERE
@@ -78,8 +82,8 @@ function get_device_list($dbh,$search_opts) {
 	    $sth->setFetchMode(PDO::FETCH_ASSOC);
             $matches=[];
 	    while($row = $sth->fetch()) {
-              $matches[] = $row['hostname'];
-              $device_arr[$row['hostname']] = $row['device_id'];
+              $matches[] = $row['sysname'];
+              $device_arr[$row['sysname']] = $row['device_id'];
             }
 	    foreach($matches as $match) {
               $layout[$v['row']][] = $match;
@@ -91,12 +95,12 @@ function get_device_list($dbh,$search_opts) {
         if (array_key_exists('locations',$search_opts)) {
           foreach($search_opts['locations'] as $k => $v) {
             $device_list=[];
-            $sql = 'SELECT devices.device_id, devices.hostname, locations.location FROM devices LEFT JOIN locations ON devices.location_id = locations.id';
+            $sql = 'SELECT devices.device_id, devices.sysname, locations.location FROM devices LEFT JOIN locations ON devices.location_id = locations.id';
             $sth = $dbh->query($sql);
             $sth->setFetchMode(PDO::FETCH_ASSOC);
             while($row = $sth->fetch()) {
-              $device_list[$row['location']][] = $row['hostname'];
-              $device_arr[$row['hostname']] = $row['device_id'];
+              $device_list[$row['location']][] = $row['sysname'];
+              $device_arr[$row['sysname']] = $row['device_id'];
             }
             foreach($device_list as $k2 => $v2) {
               if(preg_match('/'.$v['regex'].'/', $k2)) {
@@ -112,7 +116,15 @@ function get_device_list($dbh,$search_opts) {
         break;
     }
   }
-  return [$devices,$layout];
+  return [$devices,$layout,$images];
+}
+
+function ip_sysname($dbh,$sysname) {
+	$sql = "SELECT hostname FROM devices WHERE sysname = '".$sysname."'";
+	$sth = $dbh->query($sql);
+	$sth->setFetchMode(PDO::FETCH_ASSOC);
+	$row = $sth->fetch();
+	return $row['hostname'];
 }
 
 // auto-create a node grid, default size of 1080P
@@ -207,8 +219,8 @@ function auto_node_layout($devices, $layout, $grid_opts, $width=1980, $height=10
   }
   return $grid_dict;
 }
-//create node config
-function create_node_config($devices,$layout,$grid_opts,$title,$label,$map_dir,$router_image) {
+
+function create_grid_dict($devices,$layout,$grid_opts) {
   $max_row = 0;
   foreach($layout as $k => $v) {
     if(count($v) > $max_row) { $max_row = count($v); }
@@ -224,6 +236,34 @@ function create_node_config($devices,$layout,$grid_opts,$title,$label,$map_dir,$
       break;
     case 'radial' :
       $height=count(array_unique(array_keys($layout)))*$grid_opts['radius'] * 2 + $grid_opts['radius']/2;
+      $height=$height+100;
+      $width=$height;
+      break;
+  }
+  $grid_dict = auto_node_layout($devices, $layout, $grid_opts, $width, $height);
+  return $grid_dict;
+
+}
+	
+
+//create node config
+function create_node_config($devices,$layout,$grid_opts,$title,$label,$map_dir,$router_image,$images) {
+  $max_row = 0;
+  foreach($layout as $k => $v) {
+    if(count($v) > $max_row) { $max_row = count($v); }
+  }
+  switch($grid_opts['layout']) {
+    case 'top' :
+      $width=($max_row-1) * $grid_opts['colsize'] + ($grid_opts['colmargin']*2);
+      $height=(count(array_unique(array_keys($layout)))-1) * $grid_opts['rowsize'] + $grid_opts['rowmargin'] * 2;
+      break;
+    case 'left':
+      $width=(count(array_unique(array_keys($layout)))-1) * $grid_opts['rowsize'] + $grid_opts['rowmargin'] * 2;
+      $height=($max_row-1) * $grid_opts['colsize'] + ($grid_opts['colmargin']*2);
+      break;
+    case 'radial' :
+      $height=count(array_unique(array_keys($layout)))*$grid_opts['radius'] * 2 + $grid_opts['radius']/2;
+      $height=$height+100;
       $width=$height;
       break;
   }
@@ -272,8 +312,9 @@ NODE DEFAULT
 # TEMPLATE-only LINKs:
 LINK DEFAULT
 	WIDTH 3
+ 	ARROWSTYLE compact
 	BWOUTLINECOLOR none
-	BWLABEL none
+	BWLABEL bits 
 	BANDWIDTH 10G
 
 
@@ -286,7 +327,11 @@ LINK DEFAULT
     $config .= "     LABEL ".$shortname."\n";
     $config .= "     INFOURL /device/device=".$devices[$k]."/\n";
     $config .= "     OVERLIBGRAPH /graph.php?height=100&width=512&device=".$devices[$k]."&type=device_bits&legend=no\n";
-    $config .= "     ICON 80 80 ".$router_image."\n";
+    if (array_key_exists($k,$images)) {
+	    $config .= "     ICON 60 60 ".$images[$k]."\n";
+    } else {
+	    $config .= "     ICON 60 60 ".$router_image."\n";
+    }
     $config .= "     LABELOFFSET 0 10\n";
     $config .= "     POSITION ".$v['x']." ".$v['y']."\n";
     $config .= "\n";
@@ -315,8 +360,8 @@ function get_link_matrix($dbh, $devices, $link_opts, $match_iftypes) {
       l.local_port_id as local_port_id,
       l.remote_port_id as remote_port_id,
       l.remote_port as remote_port,
-      d.hostname as local_hostname,
-      d2.hostname as remote_hostname 
+      d.sysname as local_hostname,
+      d2.sysname as remote_hostname 
     FROM
       links l
       INNER JOIN ports p ON l.local_port_id=p.port_id
@@ -325,7 +370,7 @@ function get_link_matrix($dbh, $devices, $link_opts, $match_iftypes) {
       INNER JOIN devices d2 ON p2.device_id=d2.device_id
     WHERE
       p.device_id IN ($id_list)
-      AND d2.hostname IN ($in_list)
+      AND d2.sysname IN ($in_list)
       $iftype
     UNION
     SELECT
@@ -336,8 +381,8 @@ function get_link_matrix($dbh, $devices, $link_opts, $match_iftypes) {
       m.port_id as local_port_id,
       p2.port_id as remote_port_id,
       p2.ifDescr as remote_port,
-      d.hostname as local_hostname,
-      d2.hostname as remote_hostname 
+      d.sysname as local_hostname,
+      d2.sysname as remote_hostname 
     FROM
       ipv4_mac m
       INNER JOIN ports p ON m.port_id=p.port_id
@@ -347,7 +392,7 @@ function get_link_matrix($dbh, $devices, $link_opts, $match_iftypes) {
     WHERE
       m.mac_address NOT IN ('000000000000','ffffffffffff')
       AND p.device_id IN ($id_list)
-      AND d2.hostname IN ($in_list)
+      AND d2.sysname IN ($in_list)
       $iftype
   ";
   $sth = $dbh->prepare($sql);
@@ -372,19 +417,62 @@ function get_link_matrix($dbh, $devices, $link_opts, $match_iftypes) {
   return $links;
 }
 
-function create_link_config($links, $prefix = '.') {
+function create_link_config($dbh, $links, $prefix = '.', $grid_dict) {
   $config = "# regular LINKs:\n";
+  $nodecount["init"] = 0;
   foreach ($links as $k => $a) {
     $shortname = shortname($k);
     foreach ($a as $i => $v) {
+      $pair_id = $v['device_id'].$v['remote_hostname'];
+      $link_pair[$v['local_port_id']] = $v['remote_port_id'];
+      if (array_key_exists($v['remote_port_id'],$link_pair) && $link_pair[$v['remote_port_id']] == $v['local_port_id']) {
+      } else {
+
+      if ($v['remote_hostname'] == $k) {
+      } else {
+
+      if(array_key_exists($pair_id,$nodecount)) {
+	      $nodecount[$pair_id]++;
+      } else {
+	      $nodecount[$pair_id] = 1;
+      }
       $remote_shortname = shortname($v['remote_hostname']);
+      $ip_sysname = ip_sysname($dbh,$k);
       $config .= "LINK ".$shortname.":".$v['local_port']."-".$remote_shortname.":".$v['remote_port']."\n";
       $config .= "     INFOURL /graphs/type=port_bits/id=".$v['local_port_id']."/\n";
       $config .= "     OVERLIBGRAPH /graph.php?height=100&width=512&id=".$v['local_port_id']."&type=port_bits&legend=no\n";
-      $config .= "     TARGET ".$prefix."/".$k."/port-id".$v['local_port_id'].".rrd:INOCTETS:OUTOCTETS\n";
+      $config .= "     TARGET ".$prefix."/".$ip_sysname."/port-id".$v['local_port_id'].".rrd:INOCTETS:OUTOCTETS\n";
       $config .= "     NODES ".$shortname." ".$remote_shortname."\n";
+      // VIA Calculations 
+      $local_x = $grid_dict[$shortname]['x'];
+      $local_y = $grid_dict[$shortname]['y'];
+      $remote_x = $grid_dict[$remote_shortname]['x'];
+      $remote_y = $grid_dict[$remote_shortname]['y'];
+      $middle_x = ($local_x + $remote_x) / 2;
+      $middle_y = ($local_y + $remote_y) / 2;
+      echo "$shortname - $remote_shortname, $local_x, $local_y, $remote_x, $remote_y, $middle_x, $middle_y\n";
+      //
+      if ($nodecount[$pair_id] > 1) {
+	      if (($nodecount[$pair_id] % 2) == 0) {
+           	      $xoffset = $middle_x + ($nodecount[$pair_id] * 30);
+	      } else {
+		      $xoffset = $middle_x - ($nodecount[$pair_id] * 30);
+	      }
+	      if ($local_y == $remote_y) {
+		      if ($nodecount[$pair_id] > 1) {
+			      $yoffset = $middle_y + ($nodecount[$pair_id] * 30);
+		      } else {
+			      $yoffset = $middle_y - ($nodecount[$pair_id] * 30);
+		      }
+	      } else {
+		      $yoffset = $middle_y;
+	      }
+	      $config .= "     VIA ".$xoffset." ".$yoffset."\n";
+      }
       $config .= "     BANDWIDTH ".$v['bandwidth']."\n";
       $config .= "\n";
+     }
+     }
     }
   }
   return $config;

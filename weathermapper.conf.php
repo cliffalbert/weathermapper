@@ -19,6 +19,12 @@ $install_dir = '/opt/librenms';
 // LibreNMS config
 require_once($install_dir.'/config.php');
 
+$config['db_host'] = '';
+$config['db_name'] = '';
+$config['db_user'] = '';
+$config['db_pass'] = '';
+
+
 // LibreNMS Weathermap plugin directory
 $weathermap_dir  = $install_dir.'/html/plugins/Weathermap';
 
@@ -53,16 +59,16 @@ $grid_opts =  [
 
   // Only used for top/left layouts
   'colsize' => 200, // horizontal pixels between devices
-  'colmargin' => 100, // horizontal pixels from edge of canvas
-  'rowsize' => 100, // vertical pixels between devices
-  'rowmargin' => 250, // vertical pixels from edge of canvas
+  'colmargin' => 200, // horizontal pixels from edge of canvas
+  'rowsize' => 250, // vertical pixels between devices
+  'rowmargin' => 100, // vertical pixels from edge of canvas
 
   // Only used for radial layouts
-  'radius' => 400 // pixels between radial sets
+  'radius' => 180 // pixels between radial sets
 ];
 
 // ifTypes to allow (can be overriden in conf.d)
-$match_iftypes = ['ethernetCsmacd','ieee8023adLag','pppMultilinkBundle','gigabitEthernet'];
+$match_iftypes = ['ethernetCsmacd','gigabitEthernet'];
 
 // Load conf.d files
 if (is_dir($weathermapper_dir.'/conf.d')) {
